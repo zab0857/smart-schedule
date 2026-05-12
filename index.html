@@ -452,11 +452,11 @@ function isMarketOpen(){
   return t>=900 && t<=1330;
 }
 
-function stockHtml(sym,name,price,chgVal,chgPct,tag){
-  if(!price||isNaN(price)) return `<div class="stock-item"><div class="stock-sym">${sym}</div><div class="stock-name">${name}</div><div class="stock-price">--</div><div class="stock-chg flat">更新中</div></div>`;
+function stockHtml(sym,name,price,chgVal,chgPct,tag,isIdx){
+  if(!price||isNaN(price)||price<=0) return `<div class="stock-item"><div class="stock-sym">${sym}</div><div class="stock-name">${name}</div><div class="stock-price">--</div><div class="stock-chg flat">更新中</div></div>`;
   const cls   = chgVal>0?'up':chgVal<0?'dn':'flat';
   const arrow = chgVal>0?'▲':chgVal<0?'▼':'—';
-  const pStr  = sym==='加權指數' ? Math.round(price).toLocaleString() : price.toFixed(2);
+  const pStr  = isIdx ? Math.round(price).toLocaleString() : price.toFixed(2);
   const cStr  = isNaN(chgPct)?'--':(Math.abs(chgPct).toFixed(2)+'%');
   return `<div class="stock-item">
     <div class="stock-sym">${sym}</div><div class="stock-name">${name}</div>
@@ -466,142 +466,111 @@ function stockHtml(sym,name,price,chgVal,chgPct,tag){
   </div>`;
 }
 
-async function fetchTWSELive(syms){
-  const exCh = syms.map(s=>s==='t00'?'tse_t00.tw':`tse_${s}.tw`).join('|');
-  const r    = await fetchT(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0`);
-  const d    = await r.json();
-  const map  = {};
-  if(d.msgArray) for(const it of d.msgArray){
-    const price = parseFloat(it.z)>0?parseFloat(it.z):parseFloat(it.y)||0;
-    const ref   = parseFloat(it.y)||0;
-    map[it.c]   = {price,ref,chgVal:price-ref,chgPct:ref>0?(price-ref)/ref*100:0};
+/* ── Yahoo Finance via allorigins（統一來源，最穩定）── */
+async function fetchYahoo(ticker){
+  const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+  const ctrl  = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), 12000);
+  try {
+    const r     = await fetch(proxy, {signal:ctrl.signal});
+    clearTimeout(timer);
+    const outer = await r.json();
+    const data  = JSON.parse(outer.contents);
+    const meta  = data.chart.result[0].meta;
+    const price = meta.regularMarketPrice || 0;
+    const prev  = meta.chartPreviousClose || meta.previousClose || 0;
+    const chg   = price - prev;
+    const pct   = prev>0 ? chg/prev*100 : 0;
+    return {price, prev, chgVal:chg, chgPct:pct};
+  } catch {
+    clearTimeout(timer);
+    return null;
   }
-  return map;
-}
-
-async function fetchTWSEClose(sym){
-  const today=new Date(), ymd=`${today.getFullYear()}${pad(today.getMonth()+1)}${pad(today.getDate())}`;
-  const r = await fetchT(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ymd}&stockNo=${sym}`);
-  const d = await r.json();
-  if(!d.data||!d.data.length) return null;
-  const last  = d.data[d.data.length-1];
-  const price = parseFloat(last[6].replace(/,/g,''));
-  const sign  = last[7].includes('-')?-1:1;
-  const chg   = parseFloat(last[8].replace(/,/g,''))*sign;
-  return {price,ref:price-chg,chgVal:chg,chgPct:(price-chg)>0?chg/(price-chg)*100:0};
-}
-
-async function fetchTWSEIndex(){
-  const r = await fetchT('https://www.twse.com.tw/index/getHisList?type=MI_TAIEX&response=json');
-  const d = await r.json();
-  if(!d.data||!d.data.length) return null;
-  const last  = d.data[d.data.length-1];
-  const price = parseFloat(last[4].replace(/,/g,''));
-  const chg   = parseFloat(last[5].replace(/[+,]/g,''));
-  return {price,ref:price-chg,chgVal:chg,chgPct:(price-chg)>0?chg/(price-chg)*100:0};
-}
-
-async function fetchVIX(){
-  const r = await fetchT('https://stooq.com/q/l/?s=%5Evix&f=sd2t2ohlcv&h&e=json', 8000);
-  const d = await r.json();
-  if(!d.symbols||!d.symbols[0]) return null;
-  const s=d.symbols[0], price=parseFloat(s.close)||0, ref=parseFloat(s.open)||0;
-  return {price,chgVal:price-ref,chgPct:ref>0?(price-ref)/ref*100:0};
 }
 
 function vixLevel(v){
-  if(v<15) return {label:'極度樂觀',color:'#10b981'};
-  if(v<20) return {label:'市場平靜',color:'#38bdf8'};
-  if(v<25) return {label:'輕微恐慌',color:'#fbbf24'};
-  if(v<30) return {label:'明顯恐慌',color:'#fb923c'};
-  return          {label:'極度恐慌',color:'#f43f5e'};
+  if(v<15) return {label:'極度樂觀',  color:'#10b981'};
+  if(v<20) return {label:'市場平靜',  color:'#38bdf8'};
+  if(v<25) return {label:'輕微恐慌',  color:'#fbbf24'};
+  if(v<30) return {label:'明顯恐慌',  color:'#fb923c'};
+  return          {label:'極度恐慌',  color:'#f43f5e'};
 }
 
 const TICKERS = [
-  {sym:'t00',   display:'加權指數',name:'台灣加權'},
-  {sym:'0050',  display:'0050',    name:'元大台灣50'},
-  {sym:'00631L',display:'00631L',  name:'台灣50正2'},
-  {sym:'2330',  display:'2330',    name:'台積電'},
-  {sym:'2367',  display:'2367',    name:'燿華'},
+  {sym:'%5ETWII',  display:'加權指數', name:'台灣加權',  isIdx:true},
+  {sym:'0050.TW',  display:'0050',     name:'元大台灣50',isIdx:false},
+  {sym:'00631L.TW',display:'00631L',   name:'台灣50正2', isIdx:false},
+  {sym:'2330.TW',  display:'2330',     name:'台積電',    isIdx:false},
+  {sym:'2367.TW',  display:'2367',     name:'燿華',      isIdx:false},
 ];
 
-let stockRetryTimer = null;
+function isMarketOpen(){
+  const n=new Date(), dow=n.getDay();
+  if(dow===0||dow===6) return false;
+  const t=n.getHours()*100+n.getMinutes();
+  return t>=900 && t<=1330;
+}
+
+let stockRetryTimer=null;
 async function loadStocks(){
   const isOpen = isMarketOpen();
-  const tag    = isOpen?'即時':'收盤';
   document.getElementById('stock-label').textContent = isOpen?'台股即時報價':'台股收盤價格';
+  const tag = isOpen?'即時':'收盤';
 
-  let map = {};
-  try {
-    if(isOpen){
-      map = await fetchTWSELive(TICKERS.map(t=>t.sym));
-    } else {
-      const results = await Promise.allSettled([
-        fetchTWSEIndex(),
-        ...TICKERS.filter(t=>t.sym!=='t00').map(t=>fetchTWSEClose(t.sym)),
-      ]);
-      const idx = results[0].status==='fulfilled'?results[0].value:null;
-      if(idx) map['t00']=idx;
-      TICKERS.filter(t=>t.sym!=='t00').forEach((t,i)=>{
-        const r=results[i+1];
-        if(r.status==='fulfilled'&&r.value) map[t.sym]=r.value;
-      });
-    }
-  } catch(e) { /* 繼續顯示已有資料 */ }
+  const results = await Promise.all(TICKERS.map(t=>fetchYahoo(t.sym)));
+  const anyData = results.some(r=>r&&r.price>0);
 
-  const anyData = TICKERS.some(t=>map[t.sym]);
   if(!anyData){
-    document.getElementById('stock-wrap').innerHTML=`<div class="loading-txt">⏳ 股價連線中，5秒後重試<span class="dots"></span></div>`;
+    document.getElementById('stock-wrap').innerHTML=
+      `<div class="loading-txt">⏳ 股價連線中，10秒後重試<span class="dots"></span></div>`;
     if(stockRetryTimer) clearTimeout(stockRetryTimer);
-    stockRetryTimer = setTimeout(loadStocks,5000);
+    stockRetryTimer=setTimeout(loadStocks,10000);
     return;
   }
 
-  let html = '<div class="stock-row">';
-  for(const t of TICKERS){
-    const q=map[t.sym];
-    html += q ? stockHtml(t.display,t.name,q.price,q.chgVal,q.chgPct,tag)
-               : stockHtml(t.display,t.name,0,0,0,tag);
+  let html='<div class="stock-row">';
+  for(let i=0;i<TICKERS.length;i++){
+    const t=TICKERS[i], q=results[i];
+    html+=q?stockHtml(t.display,t.name,q.price,q.chgVal,q.chgPct,tag,t.isIdx)
+           :stockHtml(t.display,t.name,0,0,0,tag,t.isIdx);
   }
-  html += '</div>';
+  html+='</div>';
+  document.getElementById('stock-wrap').innerHTML=html;
 
-  // VIX 更新獨立卡片
-  try {
-    const vd = await fetchVIX();
-    if(vd){
-      const vi = vixLevel(vd.price);
-      document.getElementById('vix-card').innerHTML = `
+  // VIX 獨立更新
+  try{
+    const vd=await fetchYahoo('%5EVIX');
+    if(vd&&vd.price>0){
+      const vi=vixLevel(vd.price);
+      document.getElementById('vix-card').innerHTML=`
         <div class="ind-light" style="background:${vi.color};box-shadow:0 0 10px ${vi.color}"></div>
-        <div><div class="ind-title">VIX 恐慌指數</div>
-        <div class="ind-val">${vd.price.toFixed(2)}</div>
-        <div class="ind-sub" style="color:${vi.color}">${vi.label}</div></div>`;
+        <div>
+          <div class="ind-title">VIX 恐慌指數</div>
+          <div class="ind-val">${vd.price.toFixed(2)}</div>
+          <div class="ind-sub" style="color:${vi.color}">${vi.label}</div>
+        </div>`;
     }
-  } catch { /* VIX 失敗不影響其他 */ }
-
-  document.getElementById('stock-wrap').innerHTML = html;
+  }catch{}
 }
 loadStocks();
-setInterval(loadStocks, 3*60*1000);
+setInterval(loadStocks,3*60*1000);
 
 /* ══════════ SOX ══════════ */
 async function loadSOX(){
-  try {
-    const r = await fetchT('https://stooq.com/q/l/?s=%5Esox&f=sd2t2ohlcv&h&e=json', 8000);
-    const d = await r.json();
-    if(!d.symbols||!d.symbols[0]) throw new Error('no data');
-    const s     = d.symbols[0];
-    const price = parseFloat(s.close)||0;
-    const open  = parseFloat(s.open)||0;
-    const chg   = price-open;
-    const pct   = open>0?chg/open*100:0;
-    const cls   = chg>0?'up':chg<0?'dn':'flat';
-    const arrow = chg>0?'▲':chg<0?'▼':'—';
-    document.getElementById('sox-wrap').innerHTML = `
+  const el=document.getElementById('sox-wrap');
+  try{
+    const q=await fetchYahoo('%5ESOX');
+    if(!q||q.price<=0) throw new Error();
+    const cls=q.chgVal>0?'up':q.chgVal<0?'dn':'flat';
+    const arrow=q.chgVal>0?'▲':q.chgVal<0?'▼':'—';
+    el.innerHTML=`
       <div class="stock-row">
         <div class="stock-item" style="flex:none;min-width:160px">
-          <div class="stock-sym">SOX</div><div class="stock-name">費城半導體</div>
-          <div class="stock-price">${price>0?Math.round(price).toLocaleString():'--'}</div>
-          <div class="stock-chg ${cls}">${arrow} ${Math.abs(pct).toFixed(2)}%</div>
+          <div class="stock-sym">SOX</div>
+          <div class="stock-name">費城半導體</div>
+          <div class="stock-price">${Math.round(q.price).toLocaleString()}</div>
+          <div class="stock-chg ${cls}">${arrow} ${Math.abs(q.chgPct).toFixed(2)}%</div>
           <div class="stock-tag">美東收盤</div>
         </div>
         <div style="flex:1;display:flex;align-items:center;padding-left:16px;color:var(--text3);font-size:12px;line-height:2">
@@ -609,13 +578,13 @@ async function loadSOX(){
           🔗 費半漲 → 台股電子族群次日通常跟漲
         </div>
       </div>`;
-  } catch {
-    document.getElementById('sox-wrap').innerHTML=`<div class="loading-txt">⏳ SOX 資料更新中<span class="dots"></span></div>`;
-    setTimeout(loadSOX, 10000);
+  }catch{
+    el.innerHTML=`<div class="loading-txt">⏳ SOX 載入中，稍後重試<span class="dots"></span></div>`;
+    setTimeout(loadSOX,15000);
   }
 }
 loadSOX();
-setInterval(loadSOX, 15*60*1000);
+setInterval(loadSOX,15*60*1000);
 
 /* ══════════ THREE INSTITUTIONS ══════════ */
 const allFI  = {foreign:{buy:[],sell:[]},trust:{buy:[],sell:[]},dealer:{buy:[],sell:[]}};
