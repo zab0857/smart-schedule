@@ -530,11 +530,10 @@ function vixLevel(v){
 }
 
 const TICKERS = [
-  {sym:'%5ETWII',  display:'加權指數', name:'台灣加權',  isIdx:true},
-  {sym:'0050.TW',  display:'0050',     name:'元大台灣50',isIdx:false},
-  {sym:'00631L.TW',display:'00631L',   name:'台灣50正2', isIdx:false},
-  {sym:'2330.TW',  display:'2330',     name:'台積電',    isIdx:false},
-  {sym:'2367.TW',  display:'2367',     name:'燿華',      isIdx:false},
+  {sym:'0050.TW',  display:'0050',    name:'元大台灣50', isIdx:false},
+  {sym:'00631L.TW',display:'00631L',  name:'台灣50正2',  isIdx:false},
+  {sym:'2330.TW',  display:'2330',    name:'台積電',     isIdx:false},
+  {sym:'2367.TW',  display:'2367',    name:'燿華',       isIdx:false},
 ];
 
 function isMarketOpen(){
@@ -544,69 +543,113 @@ function isMarketOpen(){
   return t>=900 && t<=1330;
 }
 
+/* ── 加權指數：TWSE openapi（原生支援CORS，最穩定）── */
+async function fetchTWII(){
+  try{
+    // 盤中用即時API
+    const r = await fetchT('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0', 6000);
+    const d = await r.json();
+    if(d.msgArray&&d.msgArray[0]){
+      const it    = d.msgArray[0];
+      const price = parseFloat(it.z)>0?parseFloat(it.z):parseFloat(it.y)||0;
+      const prev  = parseFloat(it.y)||0;
+      if(price>0) return {price,chgVal:price-prev,chgPct:prev>0?(price-prev)/prev*100:0};
+    }
+  }catch{}
+  try{
+    // 收盤用 openapi（有CORS header）
+    const r = await fetchT('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', 6000);
+    const d = await r.json();
+    const row = d.find(x=>x['指數']==='發行量加權股價指數');
+    if(row){
+      const price = parseFloat(row['收盤指數'].replace(/,/g,''));
+      const sign  = row['漲跌']==='-'?-1:1;
+      const chg   = parseFloat(row['漲跌點數'].replace(/,/g,''))*sign;
+      return {price,chgVal:chg,chgPct:row['漲跌百分比']?parseFloat(row['漲跌百分比'])*sign:0};
+    }
+  }catch{}
+  return null;
+}
+
+/* ── SOX + VIX：透過 Claude API 查詢（不受CORS限制）── */
+async function fetchViaClaudeAPI(query){
+  try{
+    const res = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:200,
+        messages:[{role:'user',content:query}]
+      })
+    });
+    const d = await res.json();
+    if(d.content&&d.content[0]) return d.content[0].text;
+  }catch{}
+  return null;
+}
+
+async function fetchSOXandVIX(){
+  try{
+    const text = await fetchViaClaudeAPI(
+      'Give me the latest closing prices for SOX (Philadelphia Semiconductor Index) and VIX (CBOE Volatility Index). ' +
+      'Reply ONLY in this exact JSON format with no other text: {"sox":{"price":0,"chgPct":0},"vix":{"price":0,"chgPct":0}}'
+    );
+    if(!text) return null;
+    const clean = text.replace(/```json|```/g,'').trim();
+    return JSON.parse(clean);
+  }catch{ return null; }
+}
+
 let stockRetryTimer=null;
 async function loadStocks(){
   const isOpen = isMarketOpen();
   document.getElementById('stock-label').textContent = isOpen?'台股即時報價':'台股收盤價格';
   const tag = isOpen?'即時':'收盤';
 
-  const results = await Promise.all(TICKERS.map(t=>fetchYahoo(t.sym)));
-  const anyData = results.some(r=>r&&r.price>0);
+  // 平行抓：加權指數(TWSE) + 個股(Yahoo) + SOX/VIX(Claude)
+  const [twiiData, yahooResults, soxVix] = await Promise.all([
+    fetchTWII(),
+    Promise.all(TICKERS.map(t=>fetchYahoo(t.sym))),
+    fetchSOXandVIX(),
+  ]);
 
-  if(!anyData){
+  // 加權指數
+  let html='<div class="stock-row">';
+  html += twiiData
+    ? stockHtml('加權指數','台灣加權',twiiData.price,twiiData.chgVal,twiiData.chgPct,tag,true)
+    : stockHtml('加權指數','台灣加權',0,0,0,tag,true);
+
+  // 個股
+  const anyStock = yahooResults.some(r=>r&&r.price>0);
+  if(!anyStock && !twiiData){
     document.getElementById('stock-wrap').innerHTML=
       `<div class="loading-txt">⏳ 股價連線中，10秒後重試<span class="dots"></span></div>`;
     if(stockRetryTimer) clearTimeout(stockRetryTimer);
     stockRetryTimer=setTimeout(loadStocks,10000);
     return;
   }
-
-  let html='<div class="stock-row">';
   for(let i=0;i<TICKERS.length;i++){
-    const t=TICKERS[i], q=results[i];
-    html+=q?stockHtml(t.display,t.name,q.price,q.chgVal,q.chgPct,tag,t.isIdx)
-           :stockHtml(t.display,t.name,0,0,0,tag,t.isIdx);
+    const t=TICKERS[i], q=yahooResults[i];
+    html+=q?stockHtml(t.display,t.name,q.price,q.chgVal,q.chgPct,tag,false)
+           :stockHtml(t.display,t.name,0,0,0,tag,false);
   }
   html+='</div>';
   document.getElementById('stock-wrap').innerHTML=html;
 
-  // VIX 獨立更新（用多代理輪詢）
-  try{
-    const vd = await fetchVIXFinnhub();
-    if(vd&&vd.price>0){
-      const vi = vixLevel(vd.price);
-      document.getElementById('vix-card').querySelector('.ind-light').style.cssText=`background:${vi.color};box-shadow:0 0 10px ${vi.color}`;
-      document.getElementById('vix-val').textContent = vd.price.toFixed(2);
-      document.getElementById('vix-val').style.color = vi.color;
-      document.getElementById('vix-sub').textContent = vi.label;
-      document.getElementById('vix-sub').style.color = vi.color;
-    } else {
-      document.getElementById('vix-val').textContent = '--';
-      document.getElementById('vix-sub').textContent = '數據暫不可用';
-    }
-  }catch{
-    document.getElementById('vix-val').textContent = '--';
-    document.getElementById('vix-sub').textContent = '數據暫不可用';
-  }
-}
-loadStocks();
-setInterval(loadStocks,3*60*1000);
-
-/* ══════════ SOX ══════════ */
-async function loadSOX(){
-  const el=document.getElementById('sox-wrap');
-  try{
-    const q=await fetchYahoo('%5ESOX');
-    if(!q||q.price<=0) throw new Error();
-    const cls=q.chgVal>0?'up':q.chgVal<0?'dn':'flat';
-    const arrow=q.chgVal>0?'▲':q.chgVal<0?'▼':'—';
-    el.innerHTML=`
+  // SOX
+  const soxEl = document.getElementById('sox-wrap');
+  if(soxVix&&soxVix.sox&&soxVix.sox.price>0){
+    const s=soxVix.sox;
+    const cls=s.chgPct>0?'up':s.chgPct<0?'dn':'flat';
+    const arrow=s.chgPct>0?'▲':s.chgPct<0?'▼':'—';
+    soxEl.innerHTML=`
       <div class="stock-row">
         <div class="stock-item" style="flex:none;min-width:160px">
           <div class="stock-sym">SOX</div>
           <div class="stock-name">費城半導體</div>
-          <div class="stock-price">${Math.round(q.price).toLocaleString()}</div>
-          <div class="stock-chg ${cls}">${arrow} ${Math.abs(q.chgPct).toFixed(2)}%</div>
+          <div class="stock-price">${Math.round(s.price).toLocaleString()}</div>
+          <div class="stock-chg ${cls}">${arrow} ${Math.abs(s.chgPct).toFixed(2)}%</div>
           <div class="stock-tag">美東收盤</div>
         </div>
         <div style="flex:1;display:flex;align-items:center;padding-left:16px;color:var(--text3);font-size:12px;line-height:2">
@@ -614,11 +657,29 @@ async function loadSOX(){
           🔗 費半漲 → 台股電子族群次日通常跟漲
         </div>
       </div>`;
-  }catch{
-    el.innerHTML=`<div class="loading-txt">⏳ SOX 載入中，稍後重試<span class="dots"></span></div>`;
-    setTimeout(loadSOX,15000);
+  } else {
+    soxEl.innerHTML=`<div class="loading-txt">⏳ SOX 資料更新中<span class="dots"></span></div>`;
+  }
+
+  // VIX
+  if(soxVix&&soxVix.vix&&soxVix.vix.price>0){
+    const v=soxVix.vix, vi=vixLevel(v.price);
+    document.getElementById('vix-card').querySelector('.ind-light').style.cssText=
+      `background:${vi.color};box-shadow:0 0 10px ${vi.color}`;
+    document.getElementById('vix-val').textContent = v.price.toFixed(2);
+    document.getElementById('vix-val').style.color = vi.color;
+    document.getElementById('vix-sub').textContent = vi.label;
+    document.getElementById('vix-sub').style.color = vi.color;
+  } else {
+    document.getElementById('vix-val').textContent = '--';
+    document.getElementById('vix-sub').textContent = '數據暫不可用';
   }
 }
+loadStocks();
+setInterval(loadStocks,3*60*1000);
+
+/* ══════════ SOX（已整合進 loadStocks）══════════ */
+function loadSOX(){ /* 已由 loadStocks 處理 */ }
 loadSOX();
 setInterval(loadSOX,15*60*1000);
 
