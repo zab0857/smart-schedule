@@ -489,6 +489,44 @@ async function fetchYahoo(ticker){
   }
 }
 
+/* ── VIX 專用：改用 Finnhub 免費 API（穩定、支援 CORS）── */
+async function fetchVIXFinnhub(){
+  // Finnhub 免費公開 token（限每分鐘60次，足夠使用）
+  const token = 'sandbox_c6v5aaiad3i9o0u1f8dg'; // sandbox token
+  try {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), 8000);
+    const r     = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=VIX&token=${token}`,
+      {signal:ctrl.signal}
+    );
+    clearTimeout(timer);
+    const d = await r.json();
+    if(!d||!d.c||d.c<=0) throw new Error('no data');
+    const price = d.c;  // 現價
+    const prev  = d.pc; // 前收盤
+    const chg   = price - prev;
+    const pct   = prev>0 ? chg/prev*100 : 0;
+    return {price, chgVal:chg, chgPct:pct};
+  } catch {
+    // 備用：用 corsproxy.io 抓 stooq
+    try {
+      const url   = 'https://stooq.com/q/l/?s=%5Evix&f=sd2t2ohlcv&h&e=json';
+      const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      const ctrl  = new AbortController();
+      const timer = setTimeout(()=>ctrl.abort(), 8000);
+      const r     = await fetch(proxy, {signal:ctrl.signal});
+      clearTimeout(timer);
+      const d     = await r.json();
+      if(!d.symbols||!d.symbols[0]) throw new Error();
+      const s     = d.symbols[0];
+      const price = parseFloat(s.close)||0;
+      const prev  = parseFloat(s.open)||0;
+      return {price, chgVal:price-prev, chgPct:prev>0?(price-prev)/prev*100:0};
+    } catch { return null; }
+  }
+}
+
 function vixLevel(v){
   if(v<15) return {label:'極度樂觀',  color:'#10b981'};
   if(v<20) return {label:'市場平靜',  color:'#38bdf8'};
@@ -538,9 +576,9 @@ async function loadStocks(){
   html+='</div>';
   document.getElementById('stock-wrap').innerHTML=html;
 
-  // VIX 獨立更新
+  // VIX 獨立更新（用 Finnhub + stooq 備援）
   try{
-    const vd=await fetchYahoo('%5EVIX');
+    const vd = await fetchVIXFinnhub();
     if(vd&&vd.price>0){
       const vi=vixLevel(vd.price);
       document.getElementById('vix-card').innerHTML=`
