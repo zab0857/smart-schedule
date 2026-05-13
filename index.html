@@ -543,61 +543,45 @@ function isMarketOpen(){
   return t>=900 && t<=1330;
 }
 
-/* ── 加權指數：TWSE openapi（原生支援CORS，最穩定）── */
+/* ── 加權指數：TWSE openapi（確認可用，有CORS）── */
 async function fetchTWII(){
   try{
-    // 盤中用即時API
-    const r = await fetchT('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0', 6000);
+    const r = await fetchT('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', 8000);
     const d = await r.json();
-    if(d.msgArray&&d.msgArray[0]){
-      const it    = d.msgArray[0];
-      const price = parseFloat(it.z)>0?parseFloat(it.z):parseFloat(it.y)||0;
-      const prev  = parseFloat(it.y)||0;
-      if(price>0) return {price,chgVal:price-prev,chgPct:prev>0?(price-prev)/prev*100:0};
-    }
-  }catch{}
-  try{
-    // 收盤用 openapi（有CORS header）
-    const r = await fetchT('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', 6000);
-    const d = await r.json();
-    const row = d.find(x=>x['指數']==='發行量加權股價指數');
-    if(row){
-      const price = parseFloat(row['收盤指數'].replace(/,/g,''));
-      const sign  = row['漲跌']==='-'?-1:1;
-      const chg   = parseFloat(row['漲跌點數'].replace(/,/g,''))*sign;
-      return {price,chgVal:chg,chgPct:row['漲跌百分比']?parseFloat(row['漲跌百分比'])*sign:0};
-    }
-  }catch{}
-  return null;
+    const row = Array.isArray(d) && d.find(x=>x['指數']==='發行量加權股價指數');
+    if(!row) return null;
+    const price  = parseFloat(row['收盤指數'].replace(/,/g,''));
+    const pctStr = row['漲跌百分比'];
+    const sign   = row['漲跌']==='-'?-1:1;
+    const chgPct = parseFloat(pctStr)*sign||0;
+    const chgPt  = parseFloat(row['漲跌點數'].replace(/,/g,''))*sign||0;
+    return {price, chgVal:chgPt, chgPct};
+  }catch(e){ return null; }
 }
 
-/* ── SOX + VIX：透過 Claude API 查詢（不受CORS限制）── */
-async function fetchViaClaudeAPI(query){
+/* ── SOX + VIX：用 Claude API（內建支援，不受CORS）── */
+async function fetchSOXandVIX(){
   try{
     const res = await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
-        max_tokens:200,
-        messages:[{role:'user',content:query}]
+        max_tokens:150,
+        tools:[{type:'web_search_20250305',name:'web_search'}],
+        messages:[{role:'user',content:
+          'Search for the latest SOX Philadelphia Semiconductor Index closing price and VIX CBOE Volatility Index value. ' +
+          'Reply ONLY with valid JSON, no markdown, no explanation: {"sox":{"price":NUMBER,"chgPct":NUMBER},"vix":{"price":NUMBER,"chgPct":NUMBER}}'
+        }]
       })
     });
     const d = await res.json();
-    if(d.content&&d.content[0]) return d.content[0].text;
-  }catch{}
-  return null;
-}
-
-async function fetchSOXandVIX(){
-  try{
-    const text = await fetchViaClaudeAPI(
-      'Give me the latest closing prices for SOX (Philadelphia Semiconductor Index) and VIX (CBOE Volatility Index). ' +
-      'Reply ONLY in this exact JSON format with no other text: {"sox":{"price":0,"chgPct":0},"vix":{"price":0,"chgPct":0}}'
-    );
-    if(!text) return null;
-    const clean = text.replace(/```json|```/g,'').trim();
-    return JSON.parse(clean);
+    // 取最後一個 text block
+    const texts = (d.content||[]).filter(b=>b.type==='text').map(b=>b.text);
+    const text  = texts[texts.length-1]||'';
+    const match = text.match(/\{[\s\S]*"sox"[\s\S]*"vix"[\s\S]*\}/);
+    if(!match) return null;
+    return JSON.parse(match[0]);
   }catch{ return null; }
 }
 
