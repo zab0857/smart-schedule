@@ -192,7 +192,8 @@ footer span{color:var(--accent);}
         <div class="ind-card" id="vix-card">
           <div class="ind-light" style="background:var(--text3)"></div>
           <div><div class="ind-title">VIX 恐慌指數</div>
-          <div class="ind-val">--</div>
+          <div class="ind-val" id="vix-val">載入中</div>
+          <div class="ind-sub" id="vix-sub">請稍候</div></div>
           <div class="ind-sub">載入中</div></div>
         </div>
       </div>
@@ -489,42 +490,35 @@ async function fetchYahoo(ticker){
   }
 }
 
-/* ── VIX 專用：改用 Finnhub 免費 API（穩定、支援 CORS）── */
+/* ── VIX：多代理輪詢，直到成功 ── */
+const VIX_PROXIES = [
+  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+const VIX_URL = 'https://stooq.com/q/l/?s=%5Evix&f=sd2t2ohlcv&h&e=json';
+
 async function fetchVIXFinnhub(){
-  // Finnhub 免費公開 token（限每分鐘60次，足夠使用）
-  const token = 'sandbox_c6v5aaiad3i9o0u1f8dg'; // sandbox token
-  try {
-    const ctrl  = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 8000);
-    const r     = await fetch(
-      `https://finnhub.io/api/v1/quote?symbol=VIX&token=${token}`,
-      {signal:ctrl.signal}
-    );
-    clearTimeout(timer);
-    const d = await r.json();
-    if(!d||!d.c||d.c<=0) throw new Error('no data');
-    const price = d.c;  // 現價
-    const prev  = d.pc; // 前收盤
-    const chg   = price - prev;
-    const pct   = prev>0 ? chg/prev*100 : 0;
-    return {price, chgVal:chg, chgPct:pct};
-  } catch {
-    // 備用：用 corsproxy.io 抓 stooq
+  for(const makeProxy of VIX_PROXIES){
     try {
-      const url   = 'https://stooq.com/q/l/?s=%5Evix&f=sd2t2ohlcv&h&e=json';
-      const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
       const ctrl  = new AbortController();
       const timer = setTimeout(()=>ctrl.abort(), 8000);
-      const r     = await fetch(proxy, {signal:ctrl.signal});
+      const r     = await fetch(makeProxy(VIX_URL), {signal:ctrl.signal});
       clearTimeout(timer);
-      const d     = await r.json();
-      if(!d.symbols||!d.symbols[0]) throw new Error();
+      // allorigins 回傳 {contents:...}，其他直接回傳 JSON
+      const text  = await r.text();
+      let d;
+      try { const wrap=JSON.parse(text); d=wrap.contents?JSON.parse(wrap.contents):wrap; }
+      catch { continue; }
+      if(!d.symbols||!d.symbols[0]||!d.symbols[0].close) continue;
       const s     = d.symbols[0];
       const price = parseFloat(s.close)||0;
       const prev  = parseFloat(s.open)||0;
+      if(price<=0) continue;
       return {price, chgVal:price-prev, chgPct:prev>0?(price-prev)/prev*100:0};
-    } catch { return null; }
+    } catch { continue; }
   }
+  return null;
 }
 
 function vixLevel(v){
@@ -576,20 +570,24 @@ async function loadStocks(){
   html+='</div>';
   document.getElementById('stock-wrap').innerHTML=html;
 
-  // VIX 獨立更新（用 Finnhub + stooq 備援）
+  // VIX 獨立更新（用多代理輪詢）
   try{
     const vd = await fetchVIXFinnhub();
     if(vd&&vd.price>0){
-      const vi=vixLevel(vd.price);
-      document.getElementById('vix-card').innerHTML=`
-        <div class="ind-light" style="background:${vi.color};box-shadow:0 0 10px ${vi.color}"></div>
-        <div>
-          <div class="ind-title">VIX 恐慌指數</div>
-          <div class="ind-val">${vd.price.toFixed(2)}</div>
-          <div class="ind-sub" style="color:${vi.color}">${vi.label}</div>
-        </div>`;
+      const vi = vixLevel(vd.price);
+      document.getElementById('vix-card').querySelector('.ind-light').style.cssText=`background:${vi.color};box-shadow:0 0 10px ${vi.color}`;
+      document.getElementById('vix-val').textContent = vd.price.toFixed(2);
+      document.getElementById('vix-val').style.color = vi.color;
+      document.getElementById('vix-sub').textContent = vi.label;
+      document.getElementById('vix-sub').style.color = vi.color;
+    } else {
+      document.getElementById('vix-val').textContent = '--';
+      document.getElementById('vix-sub').textContent = '數據暫不可用';
     }
-  }catch{}
+  }catch{
+    document.getElementById('vix-val').textContent = '--';
+    document.getElementById('vix-sub').textContent = '數據暫不可用';
+  }
 }
 loadStocks();
 setInterval(loadStocks,3*60*1000);
