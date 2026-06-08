@@ -72,20 +72,6 @@ body::before{
 .ind-val{font-size:16px;font-weight:700;color:#fff;}
 .ind-sub{font-size:11px;color:var(--text2);margin-top:2px;}
 
-/* ── THREE INSTITUTIONS ── */
-.fi-tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
-.fi-tab{font-size:11px;padding:5px 12px;border-radius:20px;cursor:pointer;border:1px solid var(--border);color:var(--text3);background:transparent;transition:all .2s;}
-.fi-tab.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700;}
-.fi-table{width:100%;border-collapse:collapse;}
-.fi-table th{font-size:10px;letter-spacing:2px;color:var(--text3);padding:6px 10px;text-align:right;border-bottom:1px solid var(--border);}
-.fi-table th:first-child{text-align:left;}
-.fi-table td{font-size:14px;padding:9px 10px;border-bottom:1px solid rgba(30,45,69,.6);text-align:right;}
-.fi-table td:first-child{text-align:left;color:#fff;font-weight:600;}
-.fi-table tr:last-child td{border-bottom:none;}
-.fi-rank{display:inline-block;width:20px;height:20px;border-radius:50%;font-size:10px;font-weight:700;text-align:center;line-height:20px;margin-right:6px;background:var(--border);color:var(--text3);}
-.fi-rank.r1{background:#fbbf24;color:#000;} .fi-rank.r2{background:#9ca3af;color:#000;} .fi-rank.r3{background:#b45309;color:#fff;}
-.fi-buy{color:#f43f5e;font-weight:700;} .fi-sell{color:#10b981;font-weight:700;}
-.fi-date{font-size:10px;color:var(--text3);margin-left:8px;}
 
 /* ── NEXT CLASS ── */
 .next-card{background:linear-gradient(135deg,rgba(16,185,129,.09),rgba(56,189,248,.05));border-color:rgba(16,185,129,.35);}
@@ -172,12 +158,6 @@ footer span{color:var(--accent);}
     <div id="stock-wrap"><div class="loading-txt">📈 股價載入中<span class="dots"></span></div></div>
   </div>
 
-  <!-- 費半指數 -->
-  <div class="card">
-    <div class="card-label">費城半導體指數（SOX）</div>
-    <div id="sox-wrap"><div class="loading-txt">📡 SOX 載入中<span class="dots"></span></div></div>
-  </div>
-
   <!-- 景氣燈號 + VIX 獨立卡片 -->
   <div class="card">
     <div class="card-label">市場溫度計</div>
@@ -200,22 +180,6 @@ footer span{color:var(--accent);}
     </div>
   </div>
 
-  <!-- 三大法人 -->
-  <div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      <div class="card-label" style="margin-bottom:0">三大法人買賣超排行</div>
-      <span class="fi-date" id="fi-date"></span>
-    </div>
-    <div class="fi-tabs">
-      <button class="fi-tab active"  onclick="switchFI('foreign','buy',this)">🏦 外資買超</button>
-      <button class="fi-tab"         onclick="switchFI('foreign','sell',this)">🏦 外資賣超</button>
-      <button class="fi-tab"         onclick="switchFI('trust','buy',this)">🏛️ 投信買超</button>
-      <button class="fi-tab"         onclick="switchFI('trust','sell',this)">🏛️ 投信賣超</button>
-      <button class="fi-tab"         onclick="switchFI('dealer','buy',this)">🏢 自營買超</button>
-      <button class="fi-tab"         onclick="switchFI('dealer','sell',this)">🏢 自營賣超</button>
-    </div>
-    <div id="fi-wrap"><div class="loading-txt">📊 三大法人載入中<span class="dots"></span></div></div>
-  </div>
 
   <!-- 下一堂課預告 -->
   <div class="card next-card">
@@ -331,6 +295,11 @@ function fridaySpeaking(){
 }
 
 function getDay(dow){
+  const now   = new Date();
+  const today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const d0701 = new Date(2026,6,1);   // 2026-07-01
+  const d0826 = new Date(2026,7,26);  // 2026-08-26（最後一堂）
+
   switch(dow){
     case 1: return [
       {label:'16:30–18:00',sh:16,sm:30,eh:18,em:0, name:'旻桓',subj:'英文'},
@@ -340,24 +309,34 @@ function getDay(dow){
       {label:'16:30–18:30',sh:16,sm:30,eh:18,em:30,name:'旻桓',subj:'數學'},
       {label:'19:00–20:00',sh:19,sm:0, eh:20,em:0, name:'冠宇',subj:'鋼琴'},
     ];
-    case 3: return [
-      {label:'13:30–15:30',sh:13,sm:30,eh:15,em:30,name:'冠宇',subj:'數學'},
-      {label:'16:30–18:00',sh:16,sm:30,eh:18,em:0, name:'旻桓',subj:'英文'},
-      {label:'18:30–20:00',sh:18,sm:30,eh:20,em:0, name:'冠宇',subj:'英文'},
-    ];
+    case 3: {
+      const list = [
+        {label:'13:30–15:30',sh:13,sm:30,eh:15,em:30,name:'冠宇',subj:'數學'},
+        {label:'16:30–18:00',sh:16,sm:30,eh:18,em:0, name:'旻桓',subj:'英文'},
+        {label:'18:30–20:00',sh:18,sm:30,eh:20,em:0, name:'冠宇',subj:'英文'},
+      ];
+      // 7/1 起新增冠宇口說英文（週三 16:00–16:25），至 8/26 為止
+      if(today>=d0701 && today<=d0826){
+        list.unshift({label:'16:00–16:25',sh:16,sm:0,eh:16,em:25,name:'冠宇',subj:'口說英文（25分鐘）'});
+      }
+      return list;
+    }
     case 4: {
-      const t=new Date(), today=new Date(t.getFullYear(),t.getMonth(),t.getDate());
       if(today>=new Date(2026,4,21) && today<=new Date(2026,5,25))
         return [{label:'18:00–18:25',sh:18,sm:0,eh:18,em:25,name:'旻桓',subj:'口說英語（25分鐘）'}];
       return [];
     }
     case 5: {
       const sp = fridaySpeaking();
-      return [
+      const list = [
         {label:'16:30–18:30',sh:16,sm:30,eh:18,em:30,name:'旻桓',subj:'數學'},
         {label:'17:30–18:30',sh:17,sm:30,eh:18,em:30,name:'婕檥',subj:'瑜伽'},
-        {label:sp.label,sh:sp.sh,sm:sp.sm,eh:sp.eh,em:sp.em,name:'冠宇',subj:'口說英文（25分鐘）'},
       ];
+      // 冠宇週五口說英文只到 6/25，7/1 起移至週三
+      if(today < d0701){
+        list.push({label:sp.label,sh:sp.sh,sm:sp.sm,eh:sp.eh,em:sp.em,name:'冠宇',subj:'口說英文（25分鐘）'});
+      }
+      return list;
     }
     case 6: return [
       {label:'10:00–12:00',sh:10,sm:0,eh:12,em:0,name:'冠宇',subj:'數學'},
@@ -559,27 +538,26 @@ async function fetchTWII(){
   }catch(e){ return null; }
 }
 
-/* ── SOX + VIX：用 Claude API（內建支援，不受CORS）── */
-async function fetchSOXandVIX(){
+/* ── VIX：用 Claude API web_search（不受CORS限制）── */
+async function fetchVIX(){
   try{
     const res = await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
-        max_tokens:150,
+        max_tokens:100,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:
-          'Search for the latest SOX Philadelphia Semiconductor Index closing price and VIX CBOE Volatility Index value. ' +
-          'Reply ONLY with valid JSON, no markdown, no explanation: {"sox":{"price":NUMBER,"chgPct":NUMBER},"vix":{"price":NUMBER,"chgPct":NUMBER}}'
+          'What is the current VIX CBOE Volatility Index value? ' +
+          'Reply ONLY with this JSON, no markdown: {"price":NUMBER,"chgPct":NUMBER}'
         }]
       })
     });
-    const d = await res.json();
-    // 取最後一個 text block
+    const d     = await res.json();
     const texts = (d.content||[]).filter(b=>b.type==='text').map(b=>b.text);
     const text  = texts[texts.length-1]||'';
-    const match = text.match(/\{[\s\S]*"sox"[\s\S]*"vix"[\s\S]*\}/);
+    const match = text.match(/\{"price"\s*:\s*[\d.]+[\s\S]*\}/);
     if(!match) return null;
     return JSON.parse(match[0]);
   }catch{ return null; }
@@ -591,20 +569,19 @@ async function loadStocks(){
   document.getElementById('stock-label').textContent = isOpen?'台股即時報價':'台股收盤價格';
   const tag = isOpen?'即時':'收盤';
 
-  // 平行抓：加權指數(TWSE) + 個股(Yahoo) + SOX/VIX(Claude)
-  const [twiiData, yahooResults, soxVix] = await Promise.all([
+  // 平行抓：加權指數(TWSE) + 個股(Yahoo) + VIX(Claude)
+  const [twiiData, yahooResults, vixData] = await Promise.all([
     fetchTWII(),
     Promise.all(TICKERS.map(t=>fetchYahoo(t.sym))),
-    fetchSOXandVIX(),
+    fetchVIX(),
   ]);
 
-  // 加權指數
+  // 加權指數 + 個股
   let html='<div class="stock-row">';
   html += twiiData
     ? stockHtml('加權指數','台灣加權',twiiData.price,twiiData.chgVal,twiiData.chgPct,tag,true)
     : stockHtml('加權指數','台灣加權',0,0,0,tag,true);
 
-  // 個股
   const anyStock = yahooResults.some(r=>r&&r.price>0);
   if(!anyStock && !twiiData){
     document.getElementById('stock-wrap').innerHTML=
@@ -621,36 +598,12 @@ async function loadStocks(){
   html+='</div>';
   document.getElementById('stock-wrap').innerHTML=html;
 
-  // SOX
-  const soxEl = document.getElementById('sox-wrap');
-  if(soxVix&&soxVix.sox&&soxVix.sox.price>0){
-    const s=soxVix.sox;
-    const cls=s.chgPct>0?'up':s.chgPct<0?'dn':'flat';
-    const arrow=s.chgPct>0?'▲':s.chgPct<0?'▼':'—';
-    soxEl.innerHTML=`
-      <div class="stock-row">
-        <div class="stock-item" style="flex:none;min-width:160px">
-          <div class="stock-sym">SOX</div>
-          <div class="stock-name">費城半導體</div>
-          <div class="stock-price">${Math.round(s.price).toLocaleString()}</div>
-          <div class="stock-chg ${cls}">${arrow} ${Math.abs(s.chgPct).toFixed(2)}%</div>
-          <div class="stock-tag">美東收盤</div>
-        </div>
-        <div style="flex:1;display:flex;align-items:center;padding-left:16px;color:var(--text3);font-size:12px;line-height:2">
-          📌 反映台積電、AMD、英特爾等半導體龍頭<br>
-          🔗 費半漲 → 台股電子族群次日通常跟漲
-        </div>
-      </div>`;
-  } else {
-    soxEl.innerHTML=`<div class="loading-txt">⏳ SOX 資料更新中<span class="dots"></span></div>`;
-  }
-
-  // VIX
-  if(soxVix&&soxVix.vix&&soxVix.vix.price>0){
-    const v=soxVix.vix, vi=vixLevel(v.price);
+  // VIX 更新
+  if(vixData&&vixData.price>0){
+    const vi=vixLevel(vixData.price);
     document.getElementById('vix-card').querySelector('.ind-light').style.cssText=
       `background:${vi.color};box-shadow:0 0 10px ${vi.color}`;
-    document.getElementById('vix-val').textContent = v.price.toFixed(2);
+    document.getElementById('vix-val').textContent = vixData.price.toFixed(2);
     document.getElementById('vix-val').style.color = vi.color;
     document.getElementById('vix-sub').textContent = vi.label;
     document.getElementById('vix-sub').style.color = vi.color;
@@ -662,98 +615,6 @@ async function loadStocks(){
 loadStocks();
 setInterval(loadStocks,3*60*1000);
 
-/* ══════════ SOX（已整合進 loadStocks）══════════ */
-function loadSOX(){ /* 已由 loadStocks 處理 */ }
-loadSOX();
-setInterval(loadSOX,15*60*1000);
-
-/* ══════════ THREE INSTITUTIONS ══════════ */
-const allFI  = {foreign:{buy:[],sell:[]},trust:{buy:[],sell:[]},dealer:{buy:[],sell:[]}};
-let fiInst = 'foreign', fiDir = 'buy';
-
-function switchFI(inst, dir, btn){
-  fiInst=inst; fiDir=dir;
-  document.querySelectorAll('.fi-tab').forEach(t=>t.classList.remove('active'));
-  btn.classList.add('active');
-  renderFI();
-}
-
-function renderFI(){
-  const list = allFI[fiInst][fiDir];
-  if(!list||!list.length){
-    document.getElementById('fi-wrap').innerHTML=`<div class="loading-txt">暫無資料</div>`;
-    return;
-  }
-  const isBuy = fiDir==='buy';
-  let html = `<table class="fi-table"><thead><tr>
-    <th>股票</th><th>股名</th><th>${isBuy?'買超(張)':'賣超(張)'}</th><th>收盤價</th>
-  </tr></thead><tbody>`;
-  list.forEach((r,i)=>{
-    const rankCls = i===0?'r1':i===1?'r2':i===2?'r3':'';
-    const valCls  = isBuy?'fi-buy':'fi-sell';
-    html += `<tr>
-      <td><span class="fi-rank ${rankCls}">${i+1}</span>${r.code}</td>
-      <td style="color:var(--text2);font-size:13px">${r.name}</td>
-      <td class="${valCls}">${Math.abs(r.net).toLocaleString()}</td>
-      <td style="color:#fff">${r.close}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  document.getElementById('fi-wrap').innerHTML = html;
-}
-
-function parseInst(rows, col){
-  const parsed = rows.map(row=>({
-    code:  row[0].trim(),
-    name:  row[1].trim(),
-    net:   parseInt((row[col]||'0').replace(/,/g,'').replace(/\+/g,''))||0,
-    close: row[row.length-1]||'--',
-  }));
-  return {
-    buy:  [...parsed].filter(r=>r.net>0).sort((a,b)=>b.net-a.net).slice(0,10),
-    sell: [...parsed].filter(r=>r.net<0).sort((a,b)=>a.net-b.net).slice(0,10),
-  };
-}
-
-async function loadFI(){
-  try {
-    const today = new Date();
-    const ymd   = `${today.getFullYear()}${pad(today.getMonth()+1)}${pad(today.getDate())}`;
-    const r     = await fetchT(`https://www.twse.com.tw/fund/T86?response=json&date=${ymd}&selectType=ALLBUT0999`, 8000);
-    const d     = await r.json();
-    if(!d.data||!d.data.length){
-      document.getElementById('fi-wrap').innerHTML=`<div class="loading-txt">今日尚無三大法人資料（休市或資料未更新）</div>`;
-      return;
-    }
-    allFI.foreign = parseInst(d.data, 4);
-    allFI.trust   = parseInst(d.data, 7);
-    allFI.dealer  = parseInst(d.data, 10);
-    const ds = d.date||ymd;
-    document.getElementById('fi-date').textContent = `(${ds.substring(0,4)}/${ds.substring(4,6)}/${ds.substring(6,8)})`;
-    renderFI();
-  } catch {
-    document.getElementById('fi-wrap').innerHTML=`<div class="loading-txt">⏳ 三大法人連線中，稍後重試<span class="dots"></span></div>`;
-    setTimeout(loadFI, 10000);
-  }
-}
-loadFI();
-setInterval(loadFI, 15*60*1000);
-
-/* ══════════ AUTO REFRESH ══════════ */
-let rcd = 60;
-setInterval(()=>{
-  rcd--;
-  document.getElementById('rcd').textContent = rcd;
-  if(rcd<=0){
-    rcd=60;
-    renderSched();
-    renderNext();
-    updateHoliday();
-  }
-}, 1000);
-setInterval(renderNext, 60000);
-
-/* ══════════ INIT ══════════ */
 updateHoliday();
 renderSched();
 renderNext();
